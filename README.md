@@ -6,6 +6,6 @@
 5.  Keeping track of the accounts balances of the advertisers
 
 
-#Development
+#**Development**
 I have developed this contract using hardhat environment, and combination of various OpenZepplin libraries
 
