@@ -7,5 +7,5 @@
 
 
 #**Development**
-I have developed this contract using hardhat environment, and combination of various OpenZepplin libraries
+1.I have developed this contract using hardhat environment, and combination of various OpenZepplin libraries
 
