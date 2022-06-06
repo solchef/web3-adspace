@@ -245,14 +245,58 @@ contract MICPRESALE is Ownable, ReentrancyGuard {
 
         activeAccounts.push(msg.sender);
 
-        //here I am performing the transfer of the crystal to your referrer based on your count.
-
         if (ERC20InterfaceMic.transferFrom(msg.sender, address(this), _amount)) {
             micTokenPool = micTokenPool.add(_amount);
+            //here I am performing the transfer of the crystal to your referrer based on your count.
+
             emit NewPurchase(_amount, _referralAddress);
         } else {
             revert("Unable to transfer funds");
         }
+    }
+
+    function getCurrentPurchaseAmount(uint256 _purchaseId) external view returns (uint256) {
+        require(micTokenAddress != address(0), "No contract set");
+
+        // return Purchase[msg.sender][_purchaseId].purchase_amount;
+        return 1;
+    }
+
+    function getPurchaseInfo(uint256 _stakeID)
+        external
+        view
+        returns (
+            uint256,
+            int256,
+            uint256,
+            address
+        )
+    {
+        Purchase memory selectedPurchase = stake[msg.sender][_stakeID];
+
+        address myReferral = getMyReferral();
+
+        return (
+            selectedPurchase.deposit_amount,
+            selectedPurchase.purchaseAction,
+            selectedPurchase.purchaseTime,
+            myReferral
+        );
+    }
+
+    function getTotalPurchaseAmount() external view returns (uint256) {
+        require(tokenAddress != address(0), "No contract set");
+
+        Purchase[] memory currentPurchase = purchase[msg.sender];
+        uint256 numberOfPurchase = purchase[msg.sender].length;
+        uint256 totalPurchase = 0;
+        uint256 tmp;
+        for (uint256 i = 0; i < numberOfPurchase; i++) {
+            tmp = currentPurchase[i].deposit_amount;
+            totalPurchase = totalPurchase.add(tmp);
+        }
+
+        return totalPurchase;
     }
 
     function hasReferral() public view returns (bool) {
@@ -272,7 +316,7 @@ contract MICPRESALE is Ownable, ReentrancyGuard {
 
     function setReferral(address referer) internal {
         require(referer != address(0), "Invalid address");
-        require(!hasReferral(), "Referral already setted");
+        require(!hasReferral(), "Referral already set");
 
         if (referer == address(0x0000000000000000000000000000000000000001)) {
             return; //This means no referer
@@ -294,16 +338,30 @@ contract MICPRESALE is Ownable, ReentrancyGuard {
         activeAccounts.push(referer);
     }
 
-    function getCurrentPurchaseAmount(uint256 _purchaseId) external view returns (uint256) {
-        require(micTokenAddress != address(0), "No contract set");
+    function getReferralCount() external view returns (uint256) {
+        return referral[msg.sender].length;
+    }
 
-        // return Purchase[msg.sender][_purchaseId].purchase_amount;
-        return 1;
+    function getAccountReferral() external view returns (address[] memory) {
+        referral[msg.sender];
+        return referral[msg.sender];
     }
 
     function getMyReferral() public view returns (address) {
         Account memory myAccount = account_referral[msg.sender];
 
         return myAccount.referral;
+    }
+
+    function getCurrentReferrals() external view returns (address[] memory) {
+        return referral[msg.sender];
+    }
+
+    function getMICBalance() internal view returns (uint256) {
+        return ERC20InterfaceMic.balanceOf(address(this));
+    }
+
+    function getMachineState() external view returns (uint256) {
+        return amount_supplied;
     }
 }
