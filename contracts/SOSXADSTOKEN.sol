@@ -91,7 +91,9 @@ contract MICPRESALE is Ownable, ReentrancyGuard {
     address private blueCrystalAddress;
     address private micTokenAddress;
 
-    ERC20 private ERC20Interface;
+    ERC20 private ERC20InterfaceMic;
+    ERC20 private ERC20InterfaceRedCryStal;
+    ERC20 private ERC20InterfaceBlueCrystal;
 
     uint256 private redCrystalPool; //The pool where adredCrystalPools Tokens are taken
     uint256 private blueCrystalPool; //The pool where ads blueCrystalPool are taken
@@ -142,9 +144,9 @@ contract MICPRESALE is Ownable, ReentrancyGuard {
         redCrystalAddress = _redCrystalAddress;
         blueCrystalAddress = _blueCrystalAddress;
 
-        ERC20Interface = ERC20(micTokenAddress);
-        ERC20Interface = ERC20(redCrystalAddress);
-        ERC20Interface = ERC20(blueCrystalAddress);
+        ERC20InterfaceMic = ERC20(micTokenAddress);
+        ERC20InterfaceRedCryStal = ERC20(redCrystalAddress);
+        ERC20InterfaceBlueCrystal = ERC20(blueCrystalAddress);
     }
 
     function isTokenSet() external view returns (bool) {
@@ -158,22 +160,21 @@ contract MICPRESALE is Ownable, ReentrancyGuard {
         return micTokenAddress;
     }
 
-    function getblueCrystalTokenAddress() external view returns (address) {
+    function getBlueCrystalTokenAddress() external view returns (address) {
         return redCrystalAddress;
     }
 
-    function getredCrystalTokenAddress() external view returns (address) {
+    function getRedCrystalTokenAddress() external view returns (address) {
         return blueCrystalAddress;
     }
 
     function topUpRedCrystal(uint256 _amount) external onlyOwner nonReentrant {
         require(redCrystalAddress != address(1), "The redCrystal  Token Contract is not specified");
 
-        blueCrystalPool = blueCrystalPool.add(_amount);
-
-        if (ERC20Interface.transferFrom(msg.sender, address(this), _amount)) {
+        if (ERC20InterfaceRedCryStal.transferFrom(msg.sender, address(this), _amount)) {
             //Emit the event to update the UI
-            emit blueCrystalPoolUpdated(blueCrystalPool);
+            redCrystalPool = redCrystalPool.add(_amount);
+            emit redCrystalPoolUpdated(redCrystalPool);
         } else {
             revert("Unable to tranfer funds");
         }
@@ -182,9 +183,8 @@ contract MICPRESALE is Ownable, ReentrancyGuard {
     function topUpBlueCrystal(uint256 _amount) external onlyOwner nonReentrant {
         require(blueCrystalAddress != address(2), "The redCrystal  Token Contract is not specified");
 
-        blueCrystalPool = blueCrystalPool.add(_amount);
-
-        if (ERC20Interface.transferFrom(msg.sender, address(this), _amount)) {
+        if (ERC20InterfaceBlueCrystal.transferFrom(msg.sender, address(this), _amount)) {
+            blueCrystalPool = blueCrystalPool.add(_amount);
             //Emit the event to update the UI
             emit blueCrystalPoolUpdated(blueCrystalPool);
         } else {
@@ -197,11 +197,11 @@ contract MICPRESALE is Ownable, ReentrancyGuard {
     }
 
     function getCurrentMicToken() external view returns (uint256) {
-        return blueCrystalPool;
+        return micTokenPool;
     }
 
     function getCurrentRedCrystalPool() external view returns (uint256) {
-        return blueCrystalPool;
+        return redCrystalPool;
     }
 
     function getCurrentBlueCrystalPool() external view returns (uint256) {
@@ -245,7 +245,10 @@ contract MICPRESALE is Ownable, ReentrancyGuard {
 
         activeAccounts.push(msg.sender);
 
-        if (ERC20Interface.transferFrom(msg.sender, address(this), _amount)) {
+        //here I am performing the transfer of the crystal to your referrer based on your count.
+
+        if (ERC20InterfaceMic.transferFrom(msg.sender, address(this), _amount)) {
+            micTokenPool = micTokenPool.add(_amount);
             emit NewPurchase(_amount, _referralAddress);
         } else {
             revert("Unable to transfer funds");
