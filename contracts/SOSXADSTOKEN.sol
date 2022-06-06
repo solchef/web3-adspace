@@ -180,7 +180,7 @@ contract MICPRESALE is Ownable, ReentrancyGuard {
     }
 
     function topUpBlueCrystal(uint256 _amount) external onlyOwner nonReentrant {
-        require(redCrystalAddress != address(2), "The redCrystal  Token Contract is not specified");
+        require(blueCrystalAddress != address(2), "The redCrystal  Token Contract is not specified");
 
         blueCrystalPool = blueCrystalPool.add(_amount);
 
