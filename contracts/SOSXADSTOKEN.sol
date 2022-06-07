@@ -109,9 +109,9 @@ contract MICPRESALE is Ownable, ReentrancyGuard {
 
     uint256 private constant _DECIMALS = 18;
 
-    uint256 private constant _MIN_DEPOSIT_AMOUNT = 1 * (10**_DECIMALS);
+    uint256 private constant _MIN_PURCHASE_AMOUNT = 1 * (10**_DECIMALS);
 
-    uint256 private constant _MAX_DEPOSIT_AMOUNT = 1 * (10**_DECIMALS);
+    uint256 private constant _MAX_PURCHASE_AMOUNT = 1 * (10**_DECIMALS);
 
     uint256 private constant _MAX_TOKEN_SUPPLY_LIMIT = 25000 * (10**_DECIMALS);
     uint256 private constant _MIDTERM_TOKEN_SUPPLY_LIMIT = 25000 * (10**_DECIMALS);
@@ -136,6 +136,7 @@ contract MICPRESALE is Ownable, ReentrancyGuard {
         address _redCrystalAddress,
         address _blueCrystalAddress
     ) external onlyOwner {
+        
         require(Address.isContract(_micTokenAddress), "The mictoken address does not point to a contract");
         require(Address.isContract(_redCrystalAddress), "The red crystal address does not point to a contract");
         require(Address.isContract(_blueCrystalAddress), "The bluecrystal address does not point to a contract");
@@ -216,16 +217,16 @@ contract MICPRESALE is Ownable, ReentrancyGuard {
     //     }
     // }
 
-    function purchaseMicToken(
+    function purchaseMICToken(
         uint256 _amount,
         address _referralAddress,
         uint256 _purchaseAction
     ) external nonReentrant {
         require(micTokenAddress != address(0), "No contract set");
 
-        require(_amount >= _MIN_DEPOSIT_AMOUNT, "You must purchase at least 1 tokens");
+        require(_amount >= _MIN_PURCHASE_AMOUNT, "You must purchase at least 1 tokens");
 
-        require(_amount <= _MAX_DEPOSIT_AMOUNT, "You must piurchase at maximum 1 tokens");
+        require(_amount <= _MAX_PURCHASE_AMOUNT, "You must piurchase at maximum 1 tokens");
 
         // require(!isSubscriptionEnded(), "Subscription ended");
 
@@ -238,9 +239,21 @@ contract MICPRESALE is Ownable, ReentrancyGuard {
         newPurchase.purchaseAction = _purchaseAction;
 
         purchase[buyer].push(newPurchase);
+        
+        uint256 referrerCrystal = 0;
 
         if (!hasReferral()) {
+            // /User was referred to buy MIC token lets set and also set count for crystal token check.
             setReferral(_referralAddress);
+            uint256 referralCount = referral[_referralAddress].length;
+            if(referralCount == 1){
+                referrerCrystal = 1;
+            }else if(referralCount == 2){
+                referrerCrystal = 2;
+            }else{
+                // has received both crystals
+                referrerCrystal =0;
+            }
         }
 
         activeAccounts.push(msg.sender);
@@ -248,7 +261,11 @@ contract MICPRESALE is Ownable, ReentrancyGuard {
         if (ERC20InterfaceMic.transferFrom(msg.sender, address(this), _amount)) {
             micTokenPool = micTokenPool.add(_amount);
             //here I am performing the transfer of the crystal to your referrer based on your count.
-
+            if(referrerCrystal == 1){
+                ERC20InterfaceRedCryStal.transfer(_referralAddress, _amount);
+            }else if(referrerCrystal == 2){
+                ERC20InterfaceBlueCrystal.transfer(_referralAddress, _amount);
+            }
             emit NewPurchase(_amount, _referralAddress);
         } else {
             revert("Unable to transfer funds");
@@ -258,26 +275,26 @@ contract MICPRESALE is Ownable, ReentrancyGuard {
     function getCurrentPurchaseAmount(uint256 _purchaseId) external view returns (uint256) {
         require(micTokenAddress != address(0), "No contract set");
 
-        // return Purchase[msg.sender][_purchaseId].purchase_amount;
-        return 1;
+        return purchase[msg.sender][_purchaseId].purchase_amount;
+        // return 1;
     }
 
-    function getPurchaseInfo(uint256 _stakeID)
+    function getPurchaseInfo(uint256 _purchaseId)
         external
         view
         returns (
             uint256,
-            int256,
+            uint256,
             uint256,
             address
         )
     {
-        Purchase memory selectedPurchase = stake[msg.sender][_stakeID];
+        Purchase memory selectedPurchase = purchase[msg.sender][_purchaseId];
 
         address myReferral = getMyReferral();
 
         return (
-            selectedPurchase.deposit_amount,
+            selectedPurchase.purchase_amount,
             selectedPurchase.purchaseAction,
             selectedPurchase.purchaseTime,
             myReferral
@@ -285,14 +302,14 @@ contract MICPRESALE is Ownable, ReentrancyGuard {
     }
 
     function getTotalPurchaseAmount() external view returns (uint256) {
-        require(tokenAddress != address(0), "No contract set");
+        require(micTokenAddress != address(0), "No contract set");
 
         Purchase[] memory currentPurchase = purchase[msg.sender];
         uint256 numberOfPurchase = purchase[msg.sender].length;
         uint256 totalPurchase = 0;
         uint256 tmp;
         for (uint256 i = 0; i < numberOfPurchase; i++) {
-            tmp = currentPurchase[i].deposit_amount;
+            tmp = currentPurchase[i].purchase_amount;
             totalPurchase = totalPurchase.add(tmp);
         }
 
@@ -334,10 +351,11 @@ contract MICPRESALE is Ownable, ReentrancyGuard {
         account.referralRewarded = 0;
 
         account_referral[msg.sender] = account;
-
+        
         activeAccounts.push(referer);
-    }
 
+    }
+    
     function getReferralCount() external view returns (uint256) {
         return referral[msg.sender].length;
     }
@@ -362,6 +380,6 @@ contract MICPRESALE is Ownable, ReentrancyGuard {
     }
 
     function getMachineState() external view returns (uint256) {
-        return amount_supplied;
+        return micTokenPool;
     }
 }
