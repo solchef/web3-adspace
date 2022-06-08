@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: MIT
-
 pragma solidity >=0.7.6;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
@@ -8,7 +7,7 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/Address.sol";
 
-contract MICPRESALE is Ownable, ReentrancyGuard {
+contract MICMANAGER is Ownable, ReentrancyGuard {
     using SafeMath for uint256;
     using SafeMath for uint256;
     using SafeMath for uint8;
@@ -19,11 +18,12 @@ contract MICPRESALE is Ownable, ReentrancyGuard {
     struct Purchase {
         uint256 purchase_amount;
         uint256 purchaseTime;
-        uint256 purchaseAction; // 0-no-action 1-Activate RedCrystal for referrer 2-Activate Blue Crystal for referrer
+        uint256 purchaseAction; // 0 -no-action 1-Activate RedCrystal for referrer 2-Activate Blue Crystal for referrer
     }
 
     struct Account {
         address referral;
+        uint256 referralPurchaseTime;
         uint256 referralRewarded;
     }
 
@@ -46,6 +46,8 @@ contract MICPRESALE is Ownable, ReentrancyGuard {
     event redCrystalExhausted();
     event blueCrystalPoolExhausted();
 
+    event Transfer(address sender, address receiver, uint256 amount);
+
     /**
      *   @dev Emitted when a new purchase is made
      */
@@ -54,8 +56,6 @@ contract MICPRESALE is Ownable, ReentrancyGuard {
     /**
      *   @dev Emitted when a new Deposit is withdrawed
      */
-
-    event PoolWithDraw(uint256 depositID, uint256 amount);
 
     /**
      *   @dev Emitted when an crystals reward is sent
@@ -68,17 +68,10 @@ contract MICPRESALE is Ownable, ReentrancyGuard {
      *   @dev Emitted when an user  withdraws their reward
      */
 
-    event rewardWithdrawed(address account);
-
     /**
-     *   @dev Emitted when the machine is stopped (500.000 tokens)
+     *   @dev Emitted when the machine is stopped by the admin.
      */
     event machineStopped();
-
-    /**
-     *   @dev Emitted when the subscription is stopped (400.000 tokens)
-     */
-    event subscriptionStopped();
 
     //--------------------------------------------------------------------
     //-------------------------- GLOBALS -----------------------------------
@@ -90,6 +83,7 @@ contract MICPRESALE is Ownable, ReentrancyGuard {
     address private redCrystalAddress;
     address private blueCrystalAddress;
     address private micTokenAddress;
+    address payable ethVaultAddress;
 
     ERC20 private ERC20InterfaceMic;
     ERC20 private ERC20InterfaceRedCryStal;
@@ -102,33 +96,37 @@ contract MICPRESALE is Ownable, ReentrancyGuard {
     uint256 private pauseTime; //Time when the machine paused
     uint256 private stopTime; //Time when the machine stopped
 
-    mapping(address => address[]) private referral; //Store account that used the referral
+    uint256 private micEthPrice;
+
+    mapping(address => address[]) private referral; //Store account that was used for the referral
+
     mapping(address => Account) private account_referral; //Store the setted account referral
 
-    address[] private activeAccounts; //Store both Buter account and referral
+    address[] private activeAccounts; //Store both user account and referral
 
     uint256 private constant _DECIMALS = 18;
 
-    uint256 private constant _MIN_DEPOSIT_AMOUNT = 1 * (10**_DECIMALS);
+    uint256 private constant _MIN_PURCHASE_AMOUNT = 1 * (10**_DECIMALS);
 
-    uint256 private constant _MAX_DEPOSIT_AMOUNT = 1 * (10**_DECIMALS);
+    uint256 private constant _MAX_PURCHASE_AMOUNT = 1 * (10**_DECIMALS);
 
     uint256 private constant _MAX_TOKEN_SUPPLY_LIMIT = 25000 * (10**_DECIMALS);
+
     uint256 private constant _MIDTERM_TOKEN_SUPPLY_LIMIT = 25000 * (10**_DECIMALS);
 
-    constructor() public {
+    constructor() {
         redCrystalPool = 0;
         blueCrystalPool = 0;
         micTokenPool = 0;
         // amount_supplied = _MAX_TOKEN_SUPPLY_LIMIT; //The total amount of token released
 
         micTokenAddress = address(0);
-        redCrystalAddress = address(1);
-        blueCrystalAddress = address(2);
+        redCrystalAddress = address(0);
+        blueCrystalAddress = address(0);
     }
 
     //--------------------------------------------------------------------
-    //-------------------------- FUNCTIONS -----------------------------------
+    //--------------------------OWNER FUNCTIONS -----------------------------------
     //--------------------------------------------------------------------
 
     function setTokenAddress(
@@ -149,11 +147,24 @@ contract MICPRESALE is Ownable, ReentrancyGuard {
         ERC20InterfaceBlueCrystal = ERC20(blueCrystalAddress);
     }
 
+    function setEthVaultAddress(address payable _ethVaultAddress) external onlyOwner {
+        ethVaultAddress = _ethVaultAddress;
+    }
+
+    function setmicEthPrice(uint256 _micPrice) external onlyOwner {
+        micEthPrice = _micPrice;
+    }
+
     function isTokenSet() external view returns (bool) {
         if (micTokenAddress == address(0)) return false;
-        if (redCrystalAddress == address(1)) return false;
-        if (blueCrystalAddress == address(2)) return false;
+        if (redCrystalAddress == address(0)) return false;
+        if (blueCrystalAddress == address(0)) return false;
+
         return true;
+    }
+
+    function getMicEthPrice() external view returns (uint256) {
+        return micEthPrice;
     }
 
     function getMicTokenAddress() external view returns (address) {
@@ -168,8 +179,20 @@ contract MICPRESALE is Ownable, ReentrancyGuard {
         return blueCrystalAddress;
     }
 
+    function topUpMicToken(uint256 _amount) external onlyOwner nonReentrant {
+        require(micTokenAddress != address(0), "The Mic Token Contract is not specified");
+
+        if (ERC20InterfaceMic.transferFrom(msg.sender, address(this), _amount)) {
+            //Emit the event to update the UI
+            micTokenPool = micTokenPool.add(_amount);
+            emit micTokenPoolUpdated(micTokenPool);
+        } else {
+            revert("Unable to tranfer funds");
+        }
+    }
+
     function topUpRedCrystal(uint256 _amount) external onlyOwner nonReentrant {
-        require(redCrystalAddress != address(1), "The redCrystal  Token Contract is not specified");
+        require(redCrystalAddress != address(0), "The redCrystal  Token Contract is not specified");
 
         if (ERC20InterfaceRedCryStal.transferFrom(msg.sender, address(this), _amount)) {
             //Emit the event to update the UI
@@ -181,7 +204,7 @@ contract MICPRESALE is Ownable, ReentrancyGuard {
     }
 
     function topUpBlueCrystal(uint256 _amount) external onlyOwner nonReentrant {
-        require(blueCrystalAddress != address(2), "The redCrystal  Token Contract is not specified");
+        require(blueCrystalAddress != address(0), "The BlueCrystal  Token Contract is not specified");
 
         if (ERC20InterfaceBlueCrystal.transferFrom(msg.sender, address(this), _amount)) {
             blueCrystalPool = blueCrystalPool.add(_amount);
@@ -191,6 +214,20 @@ contract MICPRESALE is Ownable, ReentrancyGuard {
             revert("Unable to tranfer funds");
         }
     }
+
+    function finalShutdown() external onlyOwner nonReentrant {
+        uint256 micAmount = getMICBalance();
+        uint256 redCrystalAmount = getRedCrystalBalance();
+        uint256 blueCrystalAmount = getBlueCrystalBalance();
+
+        ERC20InterfaceMic.transfer(owner(), micAmount);
+        ERC20InterfaceRedCryStal.transfer(owner(), redCrystalAmount);
+        ERC20InterfaceBlueCrystal.transfer(owner(), blueCrystalAmount);
+    }
+
+    //--------------------------------------------------------------------
+    //--------------------------PUBLIC FUNCTIONS -------------------------
+    //--------------------------------------------------------------------
 
     function getAllAccount() external view returns (address[] memory) {
         return activeAccounts;
@@ -208,76 +245,98 @@ contract MICPRESALE is Ownable, ReentrancyGuard {
         return blueCrystalPool;
     }
 
-    // function finalShutdown() external onlyOwner nonReentrant {
-    //     // uint256 machineAmount = getMachineBalance();
+    function getMICBalance() internal view returns (uint256) {
+        return ERC20InterfaceMic.balanceOf(address(this));
+    }
 
-    //     if (!ERC20Interface.transfer(owner(), machineAmount)) {
-    //         revert("Unable to transfer funds");
-    //     }
-    // }
+    function getRedCrystalBalance() internal view returns (uint256) {
+        return ERC20InterfaceRedCryStal.balanceOf(address(this));
+    }
 
-    function purchaseMicToken(
-        uint256 _amount,
-        address _referralAddress,
-        uint256 _purchaseAction
-    ) external nonReentrant {
+    function getBlueCrystalBalance() internal view returns (uint256) {
+        return ERC20InterfaceBlueCrystal.balanceOf(address(this));
+    }
+
+    function getMachineState() external view returns (uint256) {
+        return micTokenPool;
+    }
+
+    //--------------------------------------------------------------------
+    //--------------------------USER -----------------------------------
+    //--------------------------------------------------------------------
+
+    function purchaseMICToken(address _referralAddress) public payable {
         require(micTokenAddress != address(0), "No contract set");
 
-        require(_amount >= _MIN_DEPOSIT_AMOUNT, "You must purchase at least 1 tokens");
+        require(ERC20InterfaceMic.balanceOf(msg.sender) < 1 * (10**_DECIMALS), "You can only hold one MIC token");
 
-        require(_amount <= _MAX_DEPOSIT_AMOUNT, "You must piurchase at maximum 1 tokens");
+        require(msg.sender.balance >= micEthPrice, "You need to have enough ETH amount to purchase MIC");
 
-        // require(!isSubscriptionEnded(), "Subscription ended");
+        uint256 referrerCrystal = 0;
+
+        uint256 _amount = 1000000000000000000;
+
+        if (!hasReferral()) {
+            // /User was referred to buy MIC token lets set and also set count for crystal token check.
+            if (ERC20InterfaceMic.balanceOf(_referralAddress) > 0) {
+                setReferral(_referralAddress);
+                uint256 referralCount = referral[_referralAddress].length;
+                if (referralCount == 1) {
+                    referrerCrystal = 1;
+                } else if (referralCount == 2) {
+                    referrerCrystal = 2;
+                } else {
+                    // has received both crystals
+                    referrerCrystal = 0;
+                }
+            } else {
+                // user cannot receive referral crystals since they dont hold MIC token
+            }
+        }
 
         address buyer = msg.sender;
 
         Purchase memory newPurchase;
-
         newPurchase.purchase_amount = _amount;
         newPurchase.purchaseTime = block.timestamp;
-        newPurchase.purchaseAction = _purchaseAction;
-
+        newPurchase.purchaseAction = referrerCrystal;
         purchase[buyer].push(newPurchase);
-
-        if (!hasReferral()) {
-            setReferral(_referralAddress);
-        }
-
         activeAccounts.push(msg.sender);
-
-        if (ERC20InterfaceMic.transferFrom(msg.sender, address(this), _amount)) {
-            micTokenPool = micTokenPool.add(_amount);
-            //here I am performing the transfer of the crystal to your referrer based on your count.
-
-            emit NewPurchase(_amount, _referralAddress);
-        } else {
-            revert("Unable to transfer funds");
+        emit Transfer(msg.sender, ethVaultAddress, micEthPrice);
+        // Transfer 1 MIC touser
+        ERC20InterfaceMic.transfer(msg.sender, _amount);
+        micTokenPool = micTokenPool.add(_amount);
+        //here I am performing the transfer of the crystal to your referrer based on your count.
+        if (referrerCrystal == 1) {
+            ERC20InterfaceRedCryStal.transfer(_referralAddress, _amount);
+        } else if (referrerCrystal == 2) {
+            ERC20InterfaceBlueCrystal.transfer(_referralAddress, _amount);
         }
+        emit NewPurchase(_amount, _referralAddress);
     }
 
     function getCurrentPurchaseAmount(uint256 _purchaseId) external view returns (uint256) {
         require(micTokenAddress != address(0), "No contract set");
 
-        // return Purchase[msg.sender][_purchaseId].purchase_amount;
-        return 1;
+        return purchase[msg.sender][_purchaseId].purchase_amount;
     }
 
-    function getPurchaseInfo(uint256 _stakeID)
+    function getPurchaseInfo(uint256 _purchaseId)
         external
         view
         returns (
             uint256,
-            int256,
+            uint256,
             uint256,
             address
         )
     {
-        Purchase memory selectedPurchase = stake[msg.sender][_stakeID];
+        Purchase memory selectedPurchase = purchase[msg.sender][_purchaseId];
 
         address myReferral = getMyReferral();
 
         return (
-            selectedPurchase.deposit_amount,
+            selectedPurchase.purchase_amount,
             selectedPurchase.purchaseAction,
             selectedPurchase.purchaseTime,
             myReferral
@@ -285,17 +344,16 @@ contract MICPRESALE is Ownable, ReentrancyGuard {
     }
 
     function getTotalPurchaseAmount() external view returns (uint256) {
-        require(tokenAddress != address(0), "No contract set");
+        require(micTokenAddress != address(0), "No contract set");
 
         Purchase[] memory currentPurchase = purchase[msg.sender];
         uint256 numberOfPurchase = purchase[msg.sender].length;
         uint256 totalPurchase = 0;
         uint256 tmp;
         for (uint256 i = 0; i < numberOfPurchase; i++) {
-            tmp = currentPurchase[i].deposit_amount;
+            tmp = currentPurchase[i].purchase_amount;
             totalPurchase = totalPurchase.add(tmp);
         }
-
         return totalPurchase;
     }
 
@@ -331,8 +389,8 @@ contract MICPRESALE is Ownable, ReentrancyGuard {
         Account memory account;
 
         account.referral = referer;
+        account.referralPurchaseTime = block.timestamp;
         account.referralRewarded = 0;
-
         account_referral[msg.sender] = account;
 
         activeAccounts.push(referer);
@@ -343,25 +401,15 @@ contract MICPRESALE is Ownable, ReentrancyGuard {
     }
 
     function getAccountReferral() external view returns (address[] memory) {
-        referral[msg.sender];
         return referral[msg.sender];
     }
 
     function getMyReferral() public view returns (address) {
         Account memory myAccount = account_referral[msg.sender];
-
         return myAccount.referral;
     }
 
     function getCurrentReferrals() external view returns (address[] memory) {
         return referral[msg.sender];
-    }
-
-    function getMICBalance() internal view returns (uint256) {
-        return ERC20InterfaceMic.balanceOf(address(this));
-    }
-
-    function getMachineState() external view returns (uint256) {
-        return amount_supplied;
     }
 }
